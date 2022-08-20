@@ -23,9 +23,8 @@ async fn main() {
     let s3_client = Client::new(&shared_aws_config);
 
     let token_file = get_token_from_s3(&s3_client, &config).await;
-    println!("token_file: {:?}", token_file);
 
-    let oauth_token = serde_json::from_str(
+    let oauth_token: Oauth2Token = serde_json::from_str(
         std::str::from_utf8(
             &token_file
                 .body
@@ -38,14 +37,20 @@ async fn main() {
     )
     .expect("Failed to parse file into Oauth2Token json");
 
-    println!("{:?}", oauth_token);
+    let new_oauth_token = make_refresh_token_request(&config, &oauth_token.refresh_token).await;
 
-    // todo: check for expired token and refresh
-    // then store new token
+    store_token_in_s3(
+        &s3_client,
+        &config,
+        serde_json::to_string_pretty(&new_oauth_token)
+            .expect("Failed to convert new_oauth_token to json")
+            .as_str(),
+    )
+    .await;
 
-    let tweet = send_tweet(config, &oauth_token, "Third test").await;
+    let tweet = send_tweet(config, &new_oauth_token, "Fifth test").await;
 
-    println!("{:?}", tweet);
+    println!("tweet_id: {}", tweet.data.id);
 }
 
 fn get_reqwest_client(config: &Config) -> reqwest::Client {
@@ -58,21 +63,16 @@ fn get_reqwest_client(config: &Config) -> reqwest::Client {
 async fn send_tweet(config: Config, oauth: &Oauth2Token, text: &str) -> TweetResponse {
     let client = get_reqwest_client(&config);
 
-    let r = client
+    client
         .request(Method::POST, "https://api.twitter.com/2/tweets")
         .bearer_auth(&oauth.access_token)
         .json(&HashMap::from([("text", text)]))
         .send()
         .await
-        .expect("Failed to send tweet");
-
-    println!("twitter response: {:?}", r);
-
-    let t = r.text().await.expect("Failed to get text");
-
-    println!("{:?}", t);
-
-    serde_json::from_str(t.as_str()).expect("Failed to get response into json")
+        .expect("Failed to send tweet")
+        .json()
+        .await
+        .expect("Failed to get text")
 }
 
 #[allow(dead_code)]
@@ -99,9 +99,8 @@ async fn make_access_token_request(config: Config) -> Oauth2Token {
         .expect("Failed to get response as json")
 }
 
-#[allow(dead_code)]
-async fn make_refresh_token_request(config: Config, refresh_token: &str) -> Oauth2Token {
-    let client = get_reqwest_client(&config);
+async fn make_refresh_token_request(config: &Config, refresh_token: &str) -> Oauth2Token {
+    let client = get_reqwest_client(config);
 
     let params = [
         ("refresh_token", refresh_token),
