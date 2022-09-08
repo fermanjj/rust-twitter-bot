@@ -1,4 +1,4 @@
-# Exposed Passwords Twitter Bot
+# Rust Twitter Bot
 
 ### Basic Twitter Oauth2 steps
 
